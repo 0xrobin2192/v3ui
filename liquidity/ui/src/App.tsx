@@ -2,7 +2,6 @@ import { useEffect } from 'react';
 import { HashRouter } from 'react-router-dom';
 import { ChakraProvider, useColorMode } from '@chakra-ui/react';
 import { Fonts, theme } from '@synthetixio/v3-theme';
-import { DEFAULT_QUERY_STALE_TIME } from '@snx-v3/constants';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { GasSpeedProvider } from '@snx-v3/useGasSpeed';
@@ -15,8 +14,10 @@ import { onboard } from './utils/onboard';
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
+      retry: false,
       refetchInterval: false, //  if queries needs refetching we should be explicit about it, given erc7412
-      staleTime: DEFAULT_QUERY_STALE_TIME,
+      staleTime: 5 * 60 * 1000,
+      gcTime: 60 * 60 * 1000, // 1h
       refetchOnWindowFocus: false,
       throwOnError: (e) => {
         console.error(e);
@@ -24,6 +25,7 @@ const queryClient = new QueryClient({
       },
     },
     mutations: {
+      retry: false,
       throwOnError: (e) => {
         console.error(e);
         return false;
