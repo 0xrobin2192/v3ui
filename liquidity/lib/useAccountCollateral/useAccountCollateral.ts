@@ -1,5 +1,5 @@
 import { stringToHash } from '@snx-v3/tsHelpers';
-import { useDefaultProvider, useNetwork } from '@snx-v3/useBlockchain';
+import { useDefaultProvider, useNetwork, useProvider } from '@snx-v3/useBlockchain';
 import { useCollateralTypes } from '@snx-v3/useCollateralTypes';
 import { useCoreProxy } from '@snx-v3/useCoreProxy';
 import { erc7412Call } from '@snx-v3/withERC7412';
@@ -28,11 +28,13 @@ export const loadAccountCollateral = async ({
   tokenAddresses: string[];
   CoreProxy: ethers.Contract;
 }) => {
-  const callsP = tokenAddresses.flatMap((tokenAddress) => [
-    CoreProxy.populateTransaction.getAccountAvailableCollateral(accountId, tokenAddress),
-    CoreProxy.populateTransaction.getAccountCollateral(accountId, tokenAddress),
-  ]);
-  const calls = await Promise.all(callsP);
+  const calls = await Promise.all(
+    tokenAddresses.flatMap((tokenAddress) => [
+      CoreProxy.populateTransaction.getAccountAvailableCollateral(accountId, tokenAddress),
+      CoreProxy.populateTransaction.getAccountCollateral(accountId, tokenAddress),
+    ])
+  );
+
   const decoder = (multicallEncoded: string | string[]) => {
     if (!Array.isArray(multicallEncoded)) throw Error('Expected array');
     return tokenAddresses.map((tokenAddress, i) => {
@@ -62,6 +64,7 @@ export const loadAccountCollateral = async ({
 
 export type AccountCollateralWithSymbol = AccountCollateralType & { symbol: string };
 
+// export function useAccountCollateral({ accountId }: { accountId?: string }) {}
 export function useAccountCollateral({
   accountId,
   includeDelegationOff,
@@ -74,51 +77,31 @@ export function useAccountCollateral({
   const { data: collateralTypes } = useCollateralTypes(includeDelegationOff);
 
   const provider = useDefaultProvider();
-  const { data: priceUpdateTx } = useAllCollateralPriceUpdates();
+  const { data: priceUpdateTxn } = usePriceUpdateTxn();
 
   const { data: systemToken } = useSystemToken();
 
+  const tokens = React.useMemo(() => {
+    if (collateralTypes && systemToken) {
+      return collateralTypes.map(({ tokenAddress }) => tokenAddress).concat([systemToken.address]);
+    }
+  }, [collateralTypes, systemToken]);
+
   return useQuery({
-    queryKey: [
-      `${network?.id}-${network?.preset}`,
-      'AccountCollateral',
-      { accountId },
-      { systemToken: systemToken?.address },
-      { priceUpdateTx: stringToHash(priceUpdateTx?.data) },
-    ],
-    enabled: Boolean(
-      network &&
-        provider &&
-        CoreProxy &&
-        accountId &&
-        collateralTypes &&
-        collateralTypes.length > 0 &&
-        systemToken
-    ),
+    queryKey: [`${network?.id}-${network?.preset}`, 'AccountCollateral', { accountId }],
+    enabled: Boolean(network && provider && CoreProxy && accountId && tokens),
     queryFn: async function () {
-      if (
-        !(
-          network &&
-          provider &&
-          CoreProxy &&
-          accountId &&
-          collateralTypes &&
-          collateralTypes.length > 0 &&
-          systemToken
-        )
-      ) {
+      if (!(network && provider && CoreProxy && accountId && tokens)) {
         throw new Error('OMG');
       }
 
-      const tokenAddresses = collateralTypes
-        .map((c) => c.tokenAddress)
-        .concat([systemToken.address]);
+      const calls = await Promise.all(
+        tokenAddresses.flatMap((tokenAddress) => [
+          CoreProxy.populateTransaction.getAccountAvailableCollateral(accountId, tokenAddress),
+          CoreProxy.populateTransaction.getAccountCollateral(accountId, tokenAddress),
+        ])
+      );
 
-      const { calls, decoder } = await loadAccountCollateral({
-        accountId,
-        tokenAddresses,
-        CoreProxy,
-      });
       const allCalls = [...calls];
       if (priceUpdateTx) {
         allCalls.unshift(priceUpdateTx as any);
@@ -145,41 +128,41 @@ export function useAccountCollateral({
   });
 }
 
+import { usePriceUpdateTxn } from '@snx-v3/usePriceUpdateTxn';
+
 export function useAccountSpecificCollateral(accountId?: string, collateralAddress?: string) {
   const { data: CoreProxy } = useCoreProxy();
   const { network } = useNetwork();
-  const provider = useDefaultProvider();
-  const { data: priceUpdateTx } = useAllCollateralPriceUpdates();
+  const provider = useProvider();
+  const { data: priceUpdateTxn } = usePriceUpdateTxn();
 
   return useQuery({
     queryKey: [
       `${network?.id}-${network?.preset}`,
       'AccountSpecificCollateral',
       { accountId },
-      { token: collateralAddress, priceUpdateTx: stringToHash(priceUpdateTx?.data) },
+      { token: collateralAddress },
     ],
-    enabled: Boolean(CoreProxy && accountId && collateralAddress),
+    enabled: Boolean(
+      network && provider && CoreProxy && accountId && collateralAddress && priceUpdateTxn
+    ),
     queryFn: async function () {
-      if (!CoreProxy || !accountId || !collateralAddress || !network || !provider) {
-        throw 'useAccountSpecificCollateral should not be enabled';
+      if (!(network && provider && CoreProxy && accountId && collateralAddress && priceUpdateTxn)) {
+        throw 'OMFG';
       }
       const { calls, decoder } = await loadAccountCollateral({
         accountId,
         tokenAddresses: [collateralAddress],
         CoreProxy,
       });
-      const allCalls = [...calls];
-      if (priceUpdateTx) {
-        allCalls.unshift(priceUpdateTx as any);
-      }
-
-      const data = await erc7412Call(
+      const data = await erc7412Call({
         network,
         provider,
         calls,
         decoder,
-        'useAccountSpecificCollateral'
-      );
+        logLabel: 'useAccountSpecificCollateral',
+        priceUpdateTxn,
+      });
 
       return data.at(0);
     },
