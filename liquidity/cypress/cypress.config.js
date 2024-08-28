@@ -1,6 +1,6 @@
 const { defineConfig } = require('cypress');
 
-module.exports = defineConfig({
+const config = {
   reporter: 'junit',
   reporterOptions: {
     mochaFile: './cypress/reports/junit-results.[hash].xml',
@@ -13,7 +13,7 @@ module.exports = defineConfig({
     devServer: {
       framework: 'react',
       bundler: 'webpack',
-      webpackConfig: require('@snx-v3/liquidity/webpack.config'),
+      webpackConfig: { ...require('@snx-v3/liquidity/webpack.config'), },
     },
     setupNodeEvents(on, config) {
       require('@cypress/code-coverage/task')(on, config);
@@ -59,4 +59,10 @@ module.exports = defineConfig({
     execTimeout: 120_000,
     taskTimeout: 300_000, // sometimes Anvil needs quite a bit of time to complete impersonating tx
   },
-});
+};
+
+config.component.devServer.webpackConfig.resolve = config.component.devServer.webpackConfig.resolve || {};
+config.component.devServer.webpackConfig.resolve.alias = config.component.devServer.webpackConfig.resolve.alias || {};
+config.component.devServer.webpackConfig.resolve.alias['@snx-v3/useBlockchain'] = require.resolve('./cypress/mocks/useBlockchain');
+
+module.exports = defineConfig(config);
